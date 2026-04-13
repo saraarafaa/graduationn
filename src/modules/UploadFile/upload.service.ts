@@ -45,7 +45,9 @@ class UploadService {
 
     const filesWithUrls = files.map((file) => {
       return {
-        url: `${req.protocol}://${req.get("host")}/${file.path}`,
+        ...file.toObject(),
+        fileName: file.fileName.replace(/^\d+-/, ""),
+        url: `${req.protocol}://${req.get("host")}/${file.path.replace(/\\/g, "/")}`,
       };
     });
 
@@ -93,7 +95,8 @@ class UploadService {
 
     const filesWithUrls = files.map((file) => ({
       ...file.toObject(),
-      url: `${req.protocol}://${req.get("host")}/${file.path}`,
+      fileName: file.fileName.replace(/^\d+-/, ""),
+      url: `${req.protocol}://${req.get("host")}/${file.path.replace(/\\/g, "/")}`,
     }));
 
     return res.status(200).json({
@@ -176,6 +179,23 @@ class UploadService {
     return res.status(200).json({ message: "Success" });
   };
 
+  // getAllCategories = async (
+  //   req: Request,
+  //   res: Response,
+  //   next: NextFunction,
+  // ) => {
+  //   const userId = req?.user?._id;
+
+  //   if (!userId) throw new AppError("User not found", 404);
+
+  //   const categories = await this._categoryModel.find({ filter: { userId } });
+
+  //   if (!categories)
+  //     return res.status(200).json({ message: "No categories for this user" });
+
+  //   return res.status(200).json({ message: "success", categories });
+  // };
+
   getAllCategories = async (
     req: Request,
     res: Response,
@@ -187,10 +207,29 @@ class UploadService {
 
     const categories = await this._categoryModel.find({ filter: { userId } });
 
-    if (!categories)
+    if (!categories.length) {
       return res.status(200).json({ message: "No categories for this user" });
+    }
 
-    return res.status(200).json({ message: "success", categories });
+    const updatedCategories = categories.map((category) => {
+      const words = category.categoryName.trim().split(" ");
+
+      const code = words
+        .slice(0, 2)
+        .map((word) => word[0])
+        .join("")
+        .toUpperCase();
+
+      return {
+        ...category.toObject(),
+        code,
+      };
+    });
+
+    return res.status(200).json({
+      message: "success",
+      categories: updatedCategories,
+    });
   };
 
   deleteCategory = async (req: Request, res: Response, next: NextFunction) => {
@@ -223,6 +262,96 @@ class UploadService {
     await this._categoryModel.findOneAndDelete({ _id: categoryId });
 
     return res.status(200).json({ message: "Category deleted successfully" });
+  };
+
+  addCategory = async (req: Request, res: Response, next: NextFunction) => {
+    const { categoryName } = req.body;
+    const userId = req?.user?._id;
+
+    if (!userId) throw new AppError("User Not Found", 404);
+
+    const category = await this._categoryModel.findOne({ categoryName });
+    if (category)
+      return res
+        .status(200)
+        .json({ message: "Category with this name already exists" });
+
+    const newCategory = await this._categoryModel.create({
+      categoryName,
+      userId,
+    });
+
+    return res.status(201).json({ message: "Created", newCategory });
+  };
+
+  getFilesInCategory = async (
+    req: Request,
+    res: Response,
+    next: NextFunction,
+  ) => {
+    const { categoryId } = req.params;
+    const userId = req?.user?._id;
+
+    if (!userId) throw new AppError("User Not Found", 404);
+
+    if (!categoryId) throw new AppError("CategoryId incorrect", 404);
+
+    const category = await this._categoryModel.findOne({ _id: categoryId });
+    if (!category) throw new AppError("Category Not Found", 404);
+
+    if (category.userId.toString() !== userId.toString())
+      throw new AppError("You are not authorized", 401);
+
+    const files = await this._fileModel.find({
+      filter: {
+        userId,
+        categoryId,
+      },
+    });
+
+    const filesWithUrls = files.map((file) => ({
+      ...file.toObject(),
+      fileName: file.fileName.replace(/^\d+-/, ""),
+      url: `${req.protocol}://${req.get("host")}/${file.path.replace(/\\/g, "/")}`,
+    }));
+
+    return res.status(200).json({ message: "success", filesWithUrls });
+  };
+
+  addFile = async (req: Request, res: Response, next: NextFunction) => {
+    const { categoryId } = req.params;
+    const userId = req?.user?._id;
+    const file = req?.file;
+
+    if (!userId) throw new AppError("User not found", 404);
+
+    if (!categoryId) throw new AppError("CategoryId not correct", 404);
+    if (!file) throw new AppError("No file uploaded", 400);
+
+    const category = await this._categoryModel.findOne({
+      _id: categoryId,
+      userId,
+    });
+
+    if (!category) throw new AppError("Category not found", 404);
+
+    const newFile = await this._fileModel.create({
+      userId,
+      categoryId: category?._id!,
+      fileName: file.filename,
+      path: file.path,
+    });
+
+    const cleanFileName = newFile.fileName.replace(/^\d+-/, "");
+
+    return res.status(201).json({
+      message: "file added successfully",
+      file: {
+        ...newFile.toObject(),
+        fileName: cleanFileName,
+      },
+      url: `${req.protocol}://${req.get("host")}/uploads/${file.filename}`,
+    });
   };
 }
 

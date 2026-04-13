@@ -3,13 +3,28 @@ import { FileRepository } from "../../DB/repositories/file.repository";
 import fileModel from "../../DB/models/File.model";
 import fs from "fs";
 import { AppError } from "../../utils/ClassError";
-import axios, { options } from "axios";
+import axios from "axios";
 import http from "http";
 import https from "https";
 import { summarizeSchema } from "./ai.validation";
 import { ChatRepository } from "../../DB/repositories/chat.repository";
-import chatModel from "../../DB/models/chat.model";
+import chatModel, { Source } from "../../DB/models/chat.model";
 import mongoose from "mongoose";
+import path from "path";
+
+function deduplicateSources(sources: Source[]): Source[] {
+  const map = new Map<string, Source>();
+
+  for (const item of sources) {
+    const key = `${item.source}-${item.page}`;
+
+    if (!map.has(key)) {
+      map.set(key, item);
+    }
+  }
+
+  return Array.from(map.values());
+}
 
 class AiService {
   constructor() {
@@ -40,7 +55,7 @@ class AiService {
         );
       }
 
-      const filePath = file.path;
+      const filePath = path.resolve(file.path);
 
       if (!filePath || !fs.existsSync(filePath)) {
         throw new AppError("File not found on disk", 404);
@@ -64,6 +79,7 @@ class AiService {
       );
 
       const summary = response.data.summary;
+      // const summary = "Baheb sara awiii agmal wahda fel team amora w gamela bgad yaayyyyy";
 
       const updatedFile = await this._fileModel.findOneAndUpdate(
         { _id: fileId },
@@ -73,7 +89,7 @@ class AiService {
 
       return res.json({
         message: "Summary retrieved successfully",
-        summarize: updatedFile?.summary,
+        summary: updatedFile?.summary,
         fileUrl: `${req.protocol}://${req.get("host")}/${file.path}`,
       });
     } catch (error) {
@@ -100,10 +116,12 @@ class AiService {
         );
       }
 
+      const filePath = path.resolve(file.path);
+
       const response = await axios.post(
         `${this.aiBaseUrl}/api/ask`,
         {
-          fileId,
+          filePath,
           question,
         },
         {
@@ -113,19 +131,29 @@ class AiService {
         },
       );
 
-      // const answer: string = `response.data.answer`;
+      // const answer: string = `lololollolo`;
+      // let sources = [
+      //   { source: "Networking Fundamentals lesson -5-.pdf", page: 1 },
+      //   { source: "Networking Fundamentals lesson -5-.pdf", page: 3 },
+      //   { source: "Networking Fundamentals lesson -5-.pdf", page: 4 },
+      //   { source: "Networking Fundamentals lesson -5-.pdf", page: 4 },
+      // ];
       const answer: string = response.data.answer;
+      let sources: Source[] = response.data.sources;
+
+      sources = deduplicateSources(sources);
 
       await this._chatModel.create({
         fileId: new mongoose.Types.ObjectId(fileId),
         question,
         answer,
-        createdAt: new Date(),
+        sources,
       });
 
       return res.json({
         message: "Answer retrieved successfully",
         answer,
+        sources,
       });
     } catch (error: any) {
       if (error instanceof Error && "errors" in error) {
