@@ -34,6 +34,60 @@ class AiService {
   private _chatModel = new ChatRepository(chatModel);
   private aiBaseUrl: string;
 
+  private transformSuggestions(aiData: any) {
+    if (!aiData?.suggestions) return [];
+
+    return aiData.suggestions.map((s: any) => ({
+      id: s.id,
+      title: s.title,
+      description: s.description,
+      chartType: s.type,
+
+      mapping: {
+        ...(s.x_col && {
+          x: {
+            column: s.x_col,
+            type: this.inferType(s.x_col),
+          },
+        }),
+
+        ...(s.y_col && {
+          y: {
+            column: s.y_col,
+            type: this.inferType(s.y_col),
+          },
+        }),
+
+        ...(s.color_col && {
+          color: {
+            column: s.color_col,
+            type: this.inferType(s.color_col),
+          },
+        }),
+      },
+
+      options: {
+        aggregation: s.agg,
+      },
+    }));
+  }
+
+  private inferType(column: string): "number" | "string" | "date" {
+    const col = column.toLowerCase();
+
+    if (col.includes("date") || col.includes("time")) return "date";
+
+    if (
+      col.includes("price") ||
+      col.includes("amount") ||
+      col.includes("revenue") ||
+      col.includes("count")
+    )
+      return "number";
+
+    return "string";
+  }
+
   summarize = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const { fileId } = summarizeSchema.params.parse(req.params);
@@ -193,6 +247,154 @@ class AiService {
       }
       next(error);
     }
+  };
+
+  chartOptions = async (req: Request, res: Response, next: NextFunction) => {
+    const { fileId } = req.params;
+    const userId = req?.user?._id;
+
+    if (!userId) throw new AppError("InValid UserId", 404);
+
+    if (!fileId) throw new AppError("InValid fileId", 404);
+
+    const file = await this._fileModel.findOne({ _id: fileId });
+    if (!file) throw new AppError("File not found", 404);
+
+    if (file.userId.toString() !== req.user?.id) {
+      throw new AppError("You are not authorized", 403);
+    }
+
+    if (file.fileType !== "csv") {
+      throw new AppError("Chart generation only supported for CSV", 400);
+    }
+
+    const filePath = path.resolve(file.path);
+
+    if (!filePath || !fs.existsSync(filePath)) {
+      throw new AppError("File not found on disk", 404);
+    }
+
+    const response = await axios.post(
+      `${this.aiBaseUrl}/api/chart`,
+      { filePath },
+      {
+        timeout: 600000,
+        httpAgent: new http.Agent({ keepAlive: true }),
+        httpsAgent: new https.Agent({ keepAlive: true }),
+      },
+    );
+
+    const transformedCharts = this.transformSuggestions(response.data);
+    // const transformedCharts = this.transformSuggestions({
+    //   suggestions: [
+    //     {
+    //       id: "chart_1",
+    //       title: "Revenue by Category",
+    //       description: "Bar chart of revenue",
+    //       type: "bar",
+    //       x_col: "category",
+    //       y_col: "revenue",
+    //       color_col: null,
+    //       agg: "sum",
+    //     },
+    //     {
+    //       id: "chart_2",
+    //       title: "Revenue by Category",
+    //       description: "Bar chart of lolll",
+    //       type: "bar",
+    //       x_col: "srrrr",
+    //       y_col: "vrrrr",
+    //       color_col: null,
+    //       agg: "dupl",
+    //     },
+    //   ],
+    // });
+
+    file.charts = transformedCharts;
+    await file.save();
+
+    return res.status(200).json({
+      message: "Charts generated successfully",
+      charts: transformedCharts,
+    });
+  };
+
+  visualizeCharts = async (req: Request, res: Response, next: NextFunction) => {
+    const { fileId } = req.params;
+    const { selectedCharts } = req.body;
+
+    if (!fileId) throw new AppError("Invalid fileId", 400);
+    if (!selectedCharts || !Array.isArray(selectedCharts)) {
+      throw new AppError("selectedCharts must be an array", 400);
+    }
+
+    const file = await this._fileModel.findOne({ _id: fileId });
+    if (!file) throw new AppError("File not found", 404);
+
+    if (file.userId.toString() !== req.user?.id) {
+      throw new AppError("Unauthorized", 403);
+    }
+
+    if (file.fileType !== "csv") {
+      throw new AppError("Only CSV supported", 400);
+    }
+
+    const chartsToSend = file?.charts?.filter((chart) =>
+      selectedCharts.includes(chart.id),
+    );
+
+    if (!chartsToSend) throw new AppError("No charts selected", 400);
+
+    if (chartsToSend.length === 0) {
+      throw new AppError("No valid charts selected", 400);
+    }
+
+    const filePath = path.resolve(file.path);
+
+    const response = await axios.post(
+      `${this.aiBaseUrl}/api/visualize`,
+      {
+        filePath,
+        charts: chartsToSend,
+      },
+      {
+        timeout: 600000,
+        httpAgent: new http.Agent({ keepAlive: true }),
+        httpsAgent: new https.Agent({ keepAlive: true }),
+      },
+    );
+
+    const chartsImages = response.data.results;
+    // const chartsImages = [
+    //   {
+    //     chartId: "chart_1",
+    //     imageUrl: "https://your-domain.com/uploads/charts/chart_1.png",
+    //   },
+    //   {
+    //     chartId: "chart_2",
+    //     imageUrl: "https://your-domain.com/uploads/charts/chart_2.png",
+    //   },
+    // ];
+    const imageMap = new Map(
+      chartsImages.map((item: any) => [item.chartId, item.imageUrl]),
+    );
+
+    file.charts = file.charts!.map((chart: any) => {
+      if (imageMap.has(chart.id)) {
+        return {
+          ...chart,
+          imageUrl: imageMap.get(chart.id),
+        };
+      }
+      return chart;
+    });
+
+    await file.save();
+
+    return res.status(200).json({
+      message: "Charts generated successfully",
+      charts: file.charts,
+    });
   };
 }
 

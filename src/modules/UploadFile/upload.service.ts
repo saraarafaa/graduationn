@@ -29,6 +29,7 @@ class UploadService {
       categoryId: generalCategory?._id!,
       fileName: req?.file?.filename!,
       path: req?.file?.path!,
+      fileType: "pdf"
     });
 
     return res.status(200).json({ message: "File uploaded successfully", pdf });
@@ -340,6 +341,7 @@ class UploadService {
       categoryId: category?._id!,
       fileName: file.filename,
       path: file.path,
+      fileType: "pdf"
     });
 
     const cleanFileName = newFile.fileName.replace(/^\d+-/, "");
@@ -352,6 +354,31 @@ class UploadService {
       },
       url: `${req.protocol}://${req.get("host")}/uploads/${file.filename}`,
     });
+  };
+
+  uploadCSVFile = async (req: Request, res: Response, next: NextFunction) => {
+    const file = (req as any).file as Express.Multer.File | undefined;
+    const userId = req?.user?._id;
+
+    if (!file || !file.path || !userId)
+      throw new AppError("Upload failed, Missing the file or UserId", 404);
+
+    const generalCategory = await this._categoryModel.findOne({
+      userId,
+      categoryName: "General Category",
+    });
+
+    if (!generalCategory) throw new AppError("Category Not Found", 404);
+
+    const CSV = await this._fileModel.create({
+      userId,
+      categoryId: generalCategory?._id!,
+      fileName: req?.file?.filename!,
+      path: req?.file?.path!,
+      fileType: "csv"
+    });
+
+    return res.status(200).json({ message: "File uploaded successfully", CSV });
   };
 }
 
