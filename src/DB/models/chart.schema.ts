@@ -8,7 +8,7 @@ export const mappingSchema = new Schema(
       enum: ["number", "string", "date"],
     },
   },
-  { _id: false }
+  { _id: false },
 );
 
 export const chartSchema = new Schema(
@@ -16,8 +16,7 @@ export const chartSchema = new Schema(
     id: { type: String, required: true },
     title: { type: String, required: true },
     description: { type: String },
-    imageUrl: {type: String},
-
+    fig: { type: Schema.Types.Mixed },
     chartType: {
       type: String,
       enum: ["bar", "line", "pie", "scatter", "heatmap", "histogram", "area"],
@@ -36,5 +35,5 @@ export const chartSchema = new Schema(
       aggregation: { type: String },
     },
   },
-  { _id: false }
+  { _id: false },
 );

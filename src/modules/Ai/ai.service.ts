@@ -1,6 +1,6 @@
 import { NextFunction, Request, Response } from "express";
 import { FileRepository } from "../../DB/repositories/file.repository";
-import fileModel from "../../DB/models/File.model";
+import fileModel, { IFile } from "../../DB/models/File.model";
 import fs from "fs";
 import { AppError } from "../../utils/ClassError";
 import axios from "axios";
@@ -251,70 +251,77 @@ class AiService {
 
   chartOptions = async (req: Request, res: Response, next: NextFunction) => {
     const { fileId } = req.params;
-    const userId = req?.user?._id;
+    const userId = req.user?._id?.toString();
 
-    if (!userId) throw new AppError("InValid UserId", 404);
-
-    if (!fileId) throw new AppError("InValid fileId", 404);
+    if (!userId) throw new AppError("Invalid userId", 401);
+    if (!fileId) throw new AppError("Invalid fileId", 400);
 
     const file = await this._fileModel.findOne({ _id: fileId });
     if (!file) throw new AppError("File not found", 404);
 
-    if (file.userId.toString() !== req.user?.id) {
-      throw new AppError("You are not authorized", 403);
+    if (file.userId.toString() !== userId) {
+      throw new AppError("Unauthorized", 403);
     }
 
     if (file.fileType !== "csv") {
-      throw new AppError("Chart generation only supported for CSV", 400);
+      throw new AppError("Only CSV supported", 400);
     }
 
-    const filePath = path.resolve(file.path);
-
-    if (!filePath || !fs.existsSync(filePath)) {
-      throw new AppError("File not found on disk", 404);
+    if (!file.autoclean) {
+      throw new AppError("File not ready for charts", 400);
     }
 
     const response = await axios.post(
-      `${this.aiBaseUrl}/api/chart`,
-      { filePath },
+      `${this.aiBaseUrl}/suggest`,
+      {
+        file_id: fileId,
+      },
       {
         timeout: 600000,
-        httpAgent: new http.Agent({ keepAlive: true }),
-        httpsAgent: new https.Agent({ keepAlive: true }),
       },
     );
 
-    const transformedCharts = this.transformSuggestions(response.data);
-    // const transformedCharts = this.transformSuggestions({
-    //   suggestions: [
-    //     {
-    //       id: "chart_1",
-    //       title: "Revenue by Category",
-    //       description: "Bar chart of revenue",
-    //       type: "bar",
-    //       x_col: "category",
-    //       y_col: "revenue",
-    //       color_col: null,
-    //       agg: "sum",
-    //     },
-    //     {
-    //       id: "chart_2",
-    //       title: "Revenue by Category",
-    //       description: "Bar chart of lolll",
-    //       type: "bar",
-    //       x_col: "srrrr",
-    //       y_col: "vrrrr",
-    //       color_col: null,
-    //       agg: "dupl",
-    //     },
-    //   ],
-    // });
+    const { suggestions, source } = response.data;
+
+    // const suggestions = [
+    //   { type: "bar", x: "category", y: "sales", title: "Sales by Category" },
+    //   { type: "scatter", x: "lollll", y: "saraaaaa", title: "Sales by sss" },
+    // ];
+
+    if (!suggestions || !Array.isArray(suggestions)) {
+      throw new AppError("Invalid AI response", 500);
+    }
+
+    const transformedCharts = suggestions.map((chart: any, index: number) => {
+      const mapping: any = {};
+
+      if (chart.x) {
+        mapping.x = {
+          column: chart.x,
+          type: "string",
+        };
+      }
+
+      if (chart.y) {
+        mapping.y = {
+          column: chart.y,
+          type: "number",
+        };
+      }
+
+      return {
+        id: `chart_${index + 1}`,
+        title: chart.title,
+        chartType: chart.type,
+        mapping,
+      };
+    });
 
     file.charts = transformedCharts;
     await file.save();
 
     return res.status(200).json({
-      message: "Charts generated successfully",
+      message: "Charts suggested successfully",
       charts: transformedCharts,
     });
   };
@@ -322,6 +329,7 @@ class AiService {
   visualizeCharts = async (req: Request, res: Response, next: NextFunction) => {
     const { fileId } = req.params;
     const { selectedCharts } = req.body;
+    const userId = req.user?._id?.toString();
 
     if (!fileId) throw new AppError("Invalid fileId", 400);
     if (!selectedCharts || !Array.isArray(selectedCharts)) {
@@ -331,7 +339,7 @@ class AiService {
     const file = await this._fileModel.findOne({ _id: fileId });
     if (!file) throw new AppError("File not found", 404);
 
-    if (file.userId.toString() !== req.user?.id) {
+    if (file.userId.toString() !== userId) {
       throw new AppError("Unauthorized", 403);
     }
 
@@ -339,61 +347,61 @@ class AiService {
       throw new AppError("Only CSV supported", 400);
     }
 
-    const chartsToSend = file?.charts?.filter((chart) =>
+    const chartsToSend = file.charts?.filter((chart) =>
       selectedCharts.includes(chart.id),
     );
 
-    if (!chartsToSend) throw new AppError("No charts selected", 400);
-
-    if (chartsToSend.length === 0) {
+    if (!chartsToSend || chartsToSend.length === 0) {
       throw new AppError("No valid charts selected", 400);
     }
 
-    const filePath = path.resolve(file.path);
-
     const response = await axios.post(
-      `${this.aiBaseUrl}/api/visualize`,
+      `${this.aiBaseUrl}/render`,
       {
-        filePath,
-        charts: chartsToSend,
+        file_id: fileId,
+        charts: chartsToSend.map((c) => ({
+          type: c.chartType,
+          x: c.mapping?.x?.column ?? null,
+          y: c.mapping?.y?.column ?? null,
+        })),
       },
-      {
-        timeout: 600000,
-        httpAgent: new http.Agent({ keepAlive: true }),
-        httpsAgent: new https.Agent({ keepAlive: true }),
-      },
+      { timeout: 600000 },
     );
 
-    const chartsImages = response.data.results;
-    // const chartsImages = [
+    const aiCharts = response.data.charts;
+
+    // const aiCharts = [
     //   {
-    //     chartId: "chart_1",
-    //     imageUrl: "https://your-domain.com/uploads/charts/chart_1.png",
-    //   },
-    //   {
-    //     chartId: "chart_2",
-    //     imageUrl: "https://your-domain.com/uploads/charts/chart_2.png",
+    //     success: true,
+    //     fig: { },
+    //     title: "Sales by Category",
     //   },
     // ];
-    const imageMap = new Map(
-      chartsImages.map((item: any) => [item.chartId, item.imageUrl]),
-    );
 
-    file.charts = file.charts!.map((chart: any) => {
-      if (imageMap.has(chart.id)) {
+    if (!aiCharts || !Array.isArray(aiCharts)) {
+      throw new AppError("Invalid AI response", 500);
+    }
+
+    const figMap = new Map(aiCharts.map((c: any) => [c.title, c]));
+
+    file.charts = file.charts?.map((chart) => {
+      const aiChart = figMap.get(chart.title);
+
+      if (aiChart?.success) {
         return {
           ...chart,
-          imageUrl: imageMap.get(chart.id),
+          fig: aiChart.fig,
         };
       }
+
       return chart;
     });
 
     await file.save();
 
     return res.status(200).json({
-      message: "Charts generated successfully",
-      charts: file.charts,
+      message: "Charts rendered successfully",
+      charts: aiCharts,
     });
   };
 }

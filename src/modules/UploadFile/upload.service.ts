@@ -1,14 +1,19 @@
 import { NextFunction, Request, Response } from "express";
 import { AppError } from "../../utils/ClassError";
 import { FileRepository } from "../../DB/repositories/file.repository";
-import fileModel from "../../DB/models/File.model";
+import fileModel, { IFile } from "../../DB/models/File.model";
 import fs from "fs/promises";
 import { CategoryRepository } from "../../DB/repositories/category.repository";
 import categoryModel from "../../DB/models/category.model";
+import axios from "axios";
 
 class UploadService {
+  constructor() {
+    this.aiBaseUrl = process.env.AI_SERVICE_URL || "http://localhost:8000";
+  }
   private _fileModel = new FileRepository(fileModel);
   private _categoryModel = new CategoryRepository(categoryModel);
+  private aiBaseUrl: string;
 
   upload = async (req: Request, res: Response, next: NextFunction) => {
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -29,7 +34,7 @@ class UploadService {
       categoryId: generalCategory?._id!,
       fileName: req?.file?.filename!,
       path: req?.file?.path!,
-      fileType: "pdf"
+      fileType: "pdf",
     });
 
     return res.status(200).json({ message: "File uploaded successfully", pdf });
@@ -341,7 +346,7 @@ class UploadService {
       categoryId: category?._id!,
       fileName: file.filename,
       path: file.path,
-      fileType: "pdf"
+      fileType: "pdf",
     });
 
     const cleanFileName = newFile.fileName.replace(/^\d+-/, "");
@@ -361,7 +366,7 @@ class UploadService {
     const userId = req?.user?._id;
 
     if (!file || !file.path || !userId)
-      throw new AppError("Upload failed, Missing the file or UserId", 404);
+      throw new AppError("Upload failed, Missing file or userId", 400);
 
     const generalCategory = await this._categoryModel.findOne({
       userId,
@@ -372,13 +377,47 @@ class UploadService {
 
     const CSV = await this._fileModel.create({
       userId,
-      categoryId: generalCategory?._id!,
-      fileName: req?.file?.filename!,
-      path: req?.file?.path!,
-      fileType: "csv"
+      categoryId: generalCategory._id,
+      fileName: file.filename,
+      path: file.path,
+      fileType: "csv",
     });
 
-    return res.status(200).json({ message: "File uploaded successfully", CSV });
+    const aiResponse = await axios.post(
+      `${this.aiBaseUrl}/upload`,
+      {
+        CSV: {
+          _id: CSV._id.toString(),
+          userId: CSV.userId.toString(),
+          categoryId: CSV.categoryId.toString(),
+          fileName: CSV.fileName,
+          path: CSV.path,
+          fileType: CSV.fileType,
+        },
+      },
+      {
+        timeout: 600000,
+      },
+    );
+
+    const autoclean = aiResponse.data.autoclean;
+    // const autoclean : IFile["autoclean"]= {
+    //     status: "success",
+    //     raw_shape: [1000, 12],
+    //     clean_shape: [950, 12],
+    //     rows_removed: 50,
+    //     cleaned_path: "..._autoclean.parquet",
+    //     ready_for_charts: true,
+    // };
+
+    CSV.autoclean = autoclean;
+    await CSV.save();
+
+    return res.status(200).json({
+      message: "File uploaded successfully",
+      CSV,
+      autoclean,
+    });
   };
 }
 

@@ -22,12 +22,24 @@ export interface IFile {
   scanTextSummary?: string;
   summary?: string;
 
-  charts?: {
+  autoclean?: {
+    status?: "success" | "failed";
+    raw_shape?: number[];
+    clean_shape?: number[];
+    rows_removed?: number;
+    cleaned_path?: string;
+    ready_for_charts?: boolean;
+  };
+
+  charts: {
     id: string;
     title: string;
     description?: string;
-    imageUrl?: string;
+
+    fig?: any;
+
     chartType: string;
+
     mapping?: {
       x?: { column: string; type: "number" | "string" | "date" };
       y?: { column: string; type: "number" | "string" | "date" };
@@ -35,6 +47,7 @@ export interface IFile {
       category?: { column: string; type: "number" | "string" | "date" };
       color?: { column: string; type: "number" | "string" | "date" };
     };
+
     options?: {
       aggregation?: string;
     };
@@ -67,6 +80,7 @@ const fileSchema = new Schema<IFile>(
       type: String,
       required: true,
     },
+
     fileType: {
       type: String,
       enum: ["pdf", "csv", "image"],
@@ -81,7 +95,6 @@ const fileSchema = new Schema<IFile>(
       promptInjectionRisk: String,
       contentModeration: String,
       scanStatus: String,
-
       triggerStatus: {
         type: Map,
         of: Number,
@@ -91,6 +104,23 @@ const fileSchema = new Schema<IFile>(
 
     scanTextSummary: String,
     summary: String,
+
+    autoclean: {
+      status: {
+        type: String,
+        enum: ["success", "failed"],
+      },
+      raw_shape: {
+        type: [Number],
+      },
+      clean_shape: {
+        type: [Number],
+      },
+      rows_removed: Number,
+      cleaned_path: String,
+      ready_for_charts: Boolean,
+    },
+
     charts: {
       type: [chartSchema],
       default: [],
