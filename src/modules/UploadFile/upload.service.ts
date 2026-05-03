@@ -2,18 +2,17 @@ import { NextFunction, Request, Response } from "express";
 import { AppError } from "../../utils/ClassError";
 import { FileRepository } from "../../DB/repositories/file.repository";
 import fileModel, { IFile } from "../../DB/models/File.model";
-import fs from "fs/promises";
 import { CategoryRepository } from "../../DB/repositories/category.repository";
 import categoryModel from "../../DB/models/category.model";
 import axios from "axios";
-
+import { unlink } from "fs/promises";
 class UploadService {
   constructor() {
-    this.aiBaseUrl = process.env.AI_SERVICE_URL || "http://localhost:8000";
+    this.aiBaseUrlCsv = process.env.AI_SERVICE_URL || "http://localhost:5001";
   }
   private _fileModel = new FileRepository(fileModel);
   private _categoryModel = new CategoryRepository(categoryModel);
-  private aiBaseUrl: string;
+  private aiBaseUrlCsv: string;
 
   upload = async (req: Request, res: Response, next: NextFunction) => {
     const file = (req as any).file as Express.Multer.File | undefined;
@@ -76,7 +75,7 @@ class UploadService {
     if (req?.user?._id.toString() !== file.userId.toString())
       throw new AppError("You are not authorized", 401);
 
-    await fs.unlink(file.path);
+    await unlink(file.path);
     await this._fileModel.findOneAndDelete({ _id: fileId });
 
     return res.status(200).json({ message: "File deleted" });
@@ -384,7 +383,7 @@ class UploadService {
     });
 
     const aiResponse = await axios.post(
-      `${this.aiBaseUrl}/upload`,
+      `${this.aiBaseUrlCsv}/upload`,
       {
         CSV: {
           _id: CSV._id.toString(),

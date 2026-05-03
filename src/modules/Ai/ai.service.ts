@@ -29,10 +29,12 @@ function deduplicateSources(sources: Source[]): Source[] {
 class AiService {
   constructor() {
     this.aiBaseUrl = process.env.AI_SERVICE_URL || "http://localhost:8000";
+    this.aiBaseUrlCsv = process.env.AI_SERVICE_URL || "http://localhost:5001";
   }
   private _fileModel = new FileRepository(fileModel);
   private _chatModel = new ChatRepository(chatModel);
   private aiBaseUrl: string;
+  private aiBaseUrlCsv: string;
 
   private transformSuggestions(aiData: any) {
     if (!aiData?.suggestions) return [];
@@ -272,7 +274,7 @@ class AiService {
     }
 
     const response = await axios.post(
-      `${this.aiBaseUrl}/suggest`,
+      `${this.aiBaseUrlCsv}/suggest`,
       {
         file_id: fileId,
       },
@@ -356,7 +358,7 @@ class AiService {
     }
 
     const response = await axios.post(
-      `${this.aiBaseUrl}/render`,
+      `${this.aiBaseUrlCsv}/render`,
       {
         file_id: fileId,
         charts: chartsToSend.map((c) => ({
