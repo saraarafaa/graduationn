@@ -412,9 +412,13 @@ class UploadService {
     CSV.autoclean = autoclean;
     await CSV.save();
 
+    const cleanFileName = CSV.fileName.replace(/^\d+-/, "");
     return res.status(200).json({
       message: "File uploaded successfully",
-      CSV,
+      CSV: {
+        ...CSV.toObject(),
+        fileName: cleanFileName,
+      },
       autoclean,
     });
   };
