@@ -121,6 +121,8 @@ class AiService {
         return res.json({
           message: "Already summarized",
           summary: file.summary,
+          fileUrl: `${req.protocol}://${req.get("host")}/${file.path}`,
+          fileName: file.fileName.replace(/^\d+-/, ""),
         });
       }
 
@@ -135,7 +137,8 @@ class AiService {
       );
 
       const summary = response.data.summary;
-      // const summary = "Baheb sara awiii agmal wahda fel team amora w gamela bgad yaayyyyy";
+      // const summary =
+      //   "Baheb sara awiii agmal wahda fel team amora w gamela bgad yaayyyyy";
 
       const updatedFile = await this._fileModel.findOneAndUpdate(
         { _id: fileId },
@@ -147,6 +150,7 @@ class AiService {
         message: "Summary retrieved successfully",
         summary: updatedFile?.summary,
         fileUrl: `${req.protocol}://${req.get("host")}/${file.path}`,
+        fileName: file.fileName.replace(/^\d+-/, ""),
       });
     } catch (error) {
       next(error);
@@ -210,6 +214,7 @@ class AiService {
         message: "Answer retrieved successfully",
         answer,
         sources,
+        fileName: file.fileName.replace(/^\d+-/, ""),
       });
     } catch (error: any) {
       if (error instanceof Error && "errors" in error) {
@@ -242,6 +247,7 @@ class AiService {
       return res.json({
         message: "Chat history retrieved successfully",
         chats,
+        fileName: file.fileName.replace(/^\d+-/, ""),
       });
     } catch (error: any) {
       if (error instanceof Error && "errors" in error) {
@@ -375,8 +381,28 @@ class AiService {
     // const aiCharts = [
     //   {
     //     success: true,
-    //     fig: { },
     //     title: "Sales by Category",
+    //     fig: {
+    //       data: [
+    //         {
+    //           type: "bar",
+    //           x: ["Electronics", "Clothing", "Groceries", "Books"],
+    //           y: [1200, 800, 1500, 400],
+    //           marker: {
+    //             color: "#636EFA",
+    //           },
+    //         },
+    //       ],
+    //       layout: {
+    //         title: "Sales by Category",
+    //         xaxis: {
+    //           title: "Category",
+    //         },
+    //         yaxis: {
+    //           title: "Sales",
+    //         },
+    //       },
+    //     },
     //   },
     // ];
 
@@ -401,10 +427,47 @@ class AiService {
 
     await file.save();
 
+    const updatedSelectedCharts = file.charts
+      ?.filter((chart) => selectedCharts.includes(chart.id))
+      .map((chart) => ({
+        id: chart.id,
+        title: chart.title,
+        chartType: chart.chartType,
+        mapping: chart.mapping,
+        fig: chart.fig,
+      }));
+
     return res.status(200).json({
       message: "Charts rendered successfully",
-      charts: aiCharts,
+      charts: updatedSelectedCharts,
     });
+  };
+
+  getCharts = async (req: Request, res: Response, next: NextFunction) => {
+    const userId = req?.user?._id;
+    const { fileId } = req.params;
+
+    if (!fileId) throw new AppError("File not found", 404);
+
+    if (!userId) throw new AppError("User Not found", 404);
+
+    const file = await this._fileModel.findOne({
+      _id: fileId,
+      userId,
+    });
+
+    if (!file) throw new AppError("File Not Exist", 400);
+
+    const charts = file.charts.map((chart) => ({
+      id: chart.id,
+      title: chart.title,
+      hasFigure: !!chart.fig,
+      fig: chart.fig || null,
+      mapping: chart.mapping || null,
+      chartType: chart.chartType,
+    }));
+
+    return res.status(200).json({ message: "success", charts });
   };
 }
 

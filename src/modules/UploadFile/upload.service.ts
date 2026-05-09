@@ -275,7 +275,10 @@ class UploadService {
 
     if (!userId) throw new AppError("User Not Found", 404);
 
-    const category = await this._categoryModel.findOne({ categoryName });
+    const category = await this._categoryModel.findOne({
+      userId,
+      categoryName,
+    });
     if (category)
       return res
         .status(200)
@@ -400,13 +403,13 @@ class UploadService {
     );
 
     const autoclean = aiResponse.data.autoclean;
-    // const autoclean : IFile["autoclean"]= {
-    //     status: "success",
-    //     raw_shape: [1000, 12],
-    //     clean_shape: [950, 12],
-    //     rows_removed: 50,
-    //     cleaned_path: "..._autoclean.parquet",
-    //     ready_for_charts: true,
+    // const autoclean: IFile["autoclean"] = {
+    //   status: "success",
+    //   raw_shape: [1000, 12],
+    //   clean_shape: [950, 12],
+    //   rows_removed: 50,
+    //   cleaned_path: "..._autoclean.parquet",
+    //   ready_for_charts: true,
     // };
 
     CSV.autoclean = autoclean;
